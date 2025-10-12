@@ -1,0 +1,20 @@
+/target
+.idea
+.env
+db/
+infra/db/password.txt
+data.json
+
+# Vscode settings
+.vscode
+
+# Vscode workspaces
+*.code-workspace
+
+# Indexer
+indexer.log
+run_indexer.sh
+src/bindings
+
+# Data
+vesu.json

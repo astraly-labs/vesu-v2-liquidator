@@ -1,0 +1,49 @@
+[package]
+name = "vesu-v2-liquidator"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+homepage = "https://www.vesu.xyz/"
+repository = "https://github.com/astraly-labs/vesu-v2-liquidator"
+description = "Liquidator bot for the Vesu v2 Protocol"
+readme = "README.md"
+
+[dependencies]
+evian = { version = "0.3.14", registry = "pragma", features = ["vesu_v2"] }
+pragma-common = { version = "0.4.1", features = [
+  "telemetry",
+  "serde",
+  "task-group",
+  "services",
+  "starknet",
+] }
+
+# Misc
+anyhow = "1.0"
+async-trait = "0.1"
+cainome = { version = "0.10.0", features = ["abigen-rs"] }
+clap = { version = "4.5", features = ["derive", "env"] }
+dashmap = "6"
+dotenvy = "0.15.7"
+futures-util = "0.3.30"
+num-traits = "0.2"
+reqwest = { version = "0.12", features = ["json"] }
+rust_decimal = { version = "1.37.1", features = [
+  "serde",
+  "serde-str",
+  "maths",
+  "db-diesel-postgres",
+] }
+rust_decimal_macros = "1.37.1"
+serde = "1.0"
+serde_json = "1.0"
+starknet = { version = "0.17.0" }
+strum = { version = "0.27", features = ["derive"] }
+tokio = { version = "1.47", features = ["full"] }
+toml = "0.9.7"
+tracing = "0.1"
+url = "2.5"
+colored = "2.1.0"
+
+[build-dependencies]
+cainome = { version = "0.10.0", features = ["abigen-rs"] }
