@@ -152,7 +152,7 @@ impl VesuPosition {
     /// Check if the current position is liquidable.
     /// Also logs a warning if the position is close to being liquidable.
     pub fn is_liquidable(&self) -> bool {
-        const ALMOST_LIQUIDABLE_THRESHOLD: Decimal = dec!(0.005);
+        const ALMOST_LIQUIDABLE_THRESHOLD: Decimal = dec!(0.01);
 
         if self.lltv.is_zero() {
             return false;

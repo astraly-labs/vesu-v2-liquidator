@@ -52,10 +52,10 @@ impl MonitoringService {
         tracing::info!("[🔭 Monitoring] Waiting for first vesu prices");
         VESU_PRICES.wait_for_first_prices().await;
 
-        if let Some(wait_for_indexer) = self.wait_for_indexer.take() {
-            tracing::info!("[🔭 Monitoring] Waiting for indexer to be synced before monitoring...");
-            wait_for_indexer.await?;
-        }
+        let wait_for_indexer =
+            self.wait_for_indexer.as_ref().take().expect(
+                "wait_for_indexer should be present in the Option. The task is ran only once!",
+            );
 
         let mut interval = tokio::time::interval(Duration::from_secs(10));
 
@@ -63,6 +63,8 @@ impl MonitoringService {
             tokio::select! {
                 maybe_msg = self.rx_from_indexer.recv() => {
                     if let Some((metadata, event)) = maybe_msg {
+                        tracing::info!("[🔭 Monitoring] Processing new event from block #{}", metadata.block_number);
+
                         let pool = PoolName::try_from(&metadata.from_address)?;
                         let position_key = Self::compute_position_key(metadata.from_address, &event);
 
@@ -74,7 +76,7 @@ impl MonitoringService {
                                     self.current_positions.insert((pool, position.position_id()), position);
                                 }
                                 Err(e) => {
-                                    tracing::error!("COuld not create position: {e}");
+                                    tracing::error!("[🔭 Monitoring] Could not new create position: {e}");
                                 }
                             };
                         }
@@ -93,6 +95,10 @@ impl MonitoringService {
                     }
                 },
                 _ = interval.tick() => {
+                    if !wait_for_indexer.is_terminated() {
+                        continue;
+                    }
+
                     for p in self.current_positions.values() {
                         if p.is_closed() {
                             continue;
