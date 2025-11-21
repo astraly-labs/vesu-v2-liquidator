@@ -36,6 +36,9 @@ async fn main() -> anyhow::Result<()> {
         "https://rpc.pathfinder.equilibrium.co/mainnet/rpc/v0_9"
             .parse()
             .expect("Coudlnt parse Equilibrium RPC URL?"),
+        "https://rpc.starknet.lava.build/rpc/v0_9"
+            .parse()
+            .expect("Could not parse Lava RPC URL?"),
     ])
     .expect("Could not init the Starknet provider");
 

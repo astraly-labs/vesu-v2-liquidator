@@ -87,11 +87,10 @@ impl VesuPosition {
 
         if pair_config.max_ltv.is_zero() {
             tracing::warn!(
-                "For {} {}-{} ; max LTV is {}",
+                "For {} {}-{} ; max LTV is zero...?",
                 self.pool_name,
                 self.collateral.currency,
                 self.debt.currency,
-                pair_config.max_ltv
             );
         }
 
@@ -152,7 +151,7 @@ impl VesuPosition {
     /// Check if the current position is liquidable.
     /// Also logs a warning if the position is close to being liquidable.
     pub fn is_liquidable(&self) -> bool {
-        const ALMOST_LIQUIDABLE_THRESHOLD: Decimal = dec!(0.005);
+        const ALMOST_LIQUIDABLE_THRESHOLD: Decimal = dec!(0.1);
 
         if self.lltv.is_zero() {
             return false;
@@ -263,11 +262,15 @@ impl std::fmt::Display for VesuPosition {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "Position {} with {} {} of collateral and {} {} of debt",
+            "Position #{} with {} {} of collateral and {} {} of debt",
             self.position_id(),
-            self.collateral.amount,
+            self.collateral
+                .amount
+                .round_dp(self.collateral.decimals.try_into().expect("Must fit")),
             self.collateral.currency,
-            self.debt.amount,
+            self.debt
+                .amount
+                .round_dp(self.debt.decimals.try_into().expect("Must fit")),
             self.debt.currency,
         )
     }

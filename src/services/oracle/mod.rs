@@ -23,7 +23,7 @@ pub struct OracleService {
 }
 
 impl OracleService {
-    const PRICES_UPDATE_INTERVAL: Duration = Duration::from_secs(5);
+    const PRICES_UPDATE_INTERVAL: Duration = Duration::from_secs(10);
 
     pub fn new(starknet_provider: FallbackProvider) -> Self {
         Self { starknet_provider }
@@ -65,6 +65,7 @@ impl OracleService {
     async fn vesu_price_in_usd(&self, base_asset: &OnchainAssetConfig) -> Result<Decimal> {
         const VESU_ORACLE_ADDRESS: Felt =
             felt_hex!("0xfe4bfb1b353ba51eb34dff963017f94af5a5cf8bdf3dfc191c504657f3c05");
+
         const VESU_SCALE: Decimal = dec!(18);
 
         let price_request = FunctionCall {
