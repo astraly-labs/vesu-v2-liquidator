@@ -2,7 +2,15 @@
 name = "USD Coin"
 ticker = "USDC"
 decimals = 6
-address = "0x053c91253bc9682c04929ca02ed00b3e423f6710d2ee7e0d5ebb06f3ecf368a8"
+ethereum_address = "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
+starknet_address = "0x033068F6539f8e6e6b131e6B2B814e6c34A5224bC66947c47DaB9dFeE93b35fb"
+
+[[assets]]
+name = "USDC.e Bridged"
+ticker = "USDC.E"
+decimals = 6
+ethereum_address = "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
+starknet_address = "0x053C91253BC9682c04929cA02ED00b3E423f6710D2ee7e0D5EBB06F3eCF368A8"
 
 [[assets]]
 name = "Tether USD"
@@ -15,6 +23,12 @@ name = "Starknet"
 ticker = "STRK"
 decimals = 18
 address = "0x4718f5a0fc34cc1af16a1cdee98ffb20c31f5cd61d6ab07201858f4287c938d"
+
+[[assets]]
+name = "Endur xSTRK"
+ticker = "xSTRK"
+decimals = 18
+address = "0x028d709c875c0ceac3dce7065bec5328186dc89fe254527084d1689910954b0a"
 
 [[assets]]
 name = "Ethereum"
@@ -99,3 +113,15 @@ name = "Midas Re7 Yield"
 ticker = "mRe7YIELD"
 decimals = 18
 address = "0x04be8945e61dc3e19ebadd1579a6bd53b262f51ba89e6f8b0c4bc9a7e3c633fc"
+
+[[assets]]
+name = "USN"
+ticker = "USN"
+decimals = 18
+address = "0x01e6545cab7ba4ac866768ba5e1bd540893762286ed3fea7f9c02bfa147e135b"
+
+[[assets]]
+name = "Staked USN"
+ticker = "sUSN"
+decimals = 18
+address = "0x02411565ef1a14decfbe83d2e987cced918cd752508a3d9c55deb67148d14d17"

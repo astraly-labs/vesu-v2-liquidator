@@ -21,8 +21,11 @@ use crate::{config::onchain_assets::ONCHAIN_ASSETS, services::oracle::vesu_price
 #[strum(ascii_case_insensitive)]
 pub enum Currency {
     USDC,
+    #[strum(serialize = "USDC.E")]
+    USDC_E,
     USDT,
     STRK,
+    xSTRK,
     ETH,
     wstETH,
     WBTC,
@@ -38,6 +41,8 @@ pub enum Currency {
     #[strum(serialize = "YBTC.B")]
     YBTC_B,
     mRe7YIELD,
+    USN,
+    sUSN,
 }
 
 impl Currency {
