@@ -34,10 +34,26 @@ brew install protobuf
 
 Create an `.env` file following the example file and fill the keys.
 
+#### Upgrading an existing checkout
+
+Contract bindings used to be generated into `src/bindings/`; they now live in `OUT_DIR`.
+A stale generated directory collides with the new `src/bindings.rs`, so run once:
+
+```sh
+rm -rf src/bindings
+```
+
 ## Usage
 
 ```shell
 RUST_LOG="info" cargo run --release
+```
+
+## Checks
+
+```sh
+make format   # rustfmt + clippy, denying warnings
+make test
 ```
 
 ## Contributing

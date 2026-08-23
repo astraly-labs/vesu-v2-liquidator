@@ -10,9 +10,9 @@ use num_traits::pow::Pow;
 use pragma_common::starknet::fallback_provider::FallbackProvider;
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
-use starknet::core::types::{BlockId, BlockTag, Felt, FunctionCall};
-use starknet::macros::{felt_hex, selector};
-use starknet::providers::Provider;
+use starknet_rust::core::types::{BlockId, BlockTag, Felt, FunctionCall};
+use starknet_rust::macros::{felt_hex, selector};
+use starknet_rust::providers::Provider;
 
 use crate::config::onchain_assets::OnchainAssetConfig;
 use crate::services::oracle::vesu_prices::VESU_PRICES;

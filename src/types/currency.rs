@@ -41,15 +41,13 @@ pub enum Currency {
     #[strum(serialize = "YBTC.B")]
     YBTC_B,
     mRe7YIELD,
-    USN,
     sUSN,
+    strkBTC,
+    xstrkBTC,
+    EKUBO,
 }
 
 impl Currency {
-    pub fn name(&self) -> String {
-        ONCHAIN_ASSETS[*self].name.clone()
-    }
-
     pub fn decimals(&self) -> u32 {
         ONCHAIN_ASSETS[*self].decimals
     }
@@ -58,19 +56,11 @@ impl Currency {
         Decimal::from(self.decimals())
     }
 
-    pub fn address(&self) -> starknet::core::types::Felt {
+    pub fn address(&self) -> starknet_rust::core::types::Felt {
         ONCHAIN_ASSETS[*self].address
-    }
-
-    pub fn is(&self, other: Currency) -> bool {
-        *self == other
     }
 
     pub fn price(&self) -> Decimal {
         VESU_PRICES.of(*self)
-    }
-
-    pub fn ticker(&self) -> String {
-        ONCHAIN_ASSETS[*self].ticker.clone()
     }
 }

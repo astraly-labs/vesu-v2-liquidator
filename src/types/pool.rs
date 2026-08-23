@@ -1,9 +1,10 @@
-use anyhow::bail;
-use evian::vesu::v2::data::indexer::events::{
+use anyhow::Context;
+use evian::vesu_v2::data::indexer::events::{
     CollateralAddress, DebtAddress, PoolAddress, PoolDetails,
 };
 use serde::{Deserialize, Serialize};
-use starknet::{core::types::Felt, macros::felt_hex};
+use starknet_rust::{core::types::Felt, macros::felt_hex};
+use strum::IntoEnumIterator;
 
 use crate::types::currency::Currency;
 
@@ -31,6 +32,10 @@ pub enum PoolName {
     Re7xBTC,
     Re7USDCStableCore,
     Re7USDCFrontier,
+    Re7ETH,
+    Re7STRK,
+    ClearstarUSDCReactor,
+    Re7LabsStarknetEcosystem,
 }
 
 impl PoolName {
@@ -54,6 +59,18 @@ impl PoolName {
             Self::Re7USDCFrontier => {
                 felt_hex!("0x05c03e7e0ccfe79c634782388eb1e6ed4e8e2a013ab0fcc055140805e46261bd")
             }
+            Self::Re7ETH => {
+                felt_hex!("0x0635cb8ba1c3b0b21cb2056f6b1ba75c3421ce505212aeb43ffd56b58343fa17")
+            }
+            Self::Re7STRK => {
+                felt_hex!("0x01fcdacc1d8184eca7b472b5acbaf1500cec9d5683ca95fede8128b46c8f9cc2")
+            }
+            Self::ClearstarUSDCReactor => {
+                felt_hex!("0x01bc5de51365ed7fbb11ebc81cef9fd66b70050ec10fd898f0c4698765bf5803")
+            }
+            Self::Re7LabsStarknetEcosystem => {
+                felt_hex!("0x0486294fe74daf3d964523e7a1f4e5d686f153934b2c183ececa0cab9dd2f3e6")
+            }
         }
     }
 
@@ -69,15 +86,10 @@ impl PoolName {
 impl TryFrom<&Felt> for PoolName {
     type Error = anyhow::Error;
 
+    /// Driven by `EnumIter` so that a new variant can never be forgotten here.
     fn try_from(value: &Felt) -> Result<Self, Self::Error> {
-        match () {
-            _ if value == &Self::Prime.pool_address() => Ok(Self::Prime),
-            _ if value == &Self::Re7USDCPrime.pool_address() => Ok(Self::Re7USDCPrime),
-            _ if value == &Self::Re7USDCCore.pool_address() => Ok(Self::Re7USDCCore),
-            _ if value == &Self::Re7xBTC.pool_address() => Ok(Self::Re7xBTC),
-            _ if value == &Self::Re7USDCStableCore.pool_address() => Ok(Self::Re7USDCStableCore),
-            _ if value == &Self::Re7USDCFrontier.pool_address() => Ok(Self::Re7USDCFrontier),
-            () => bail!("Unknown VesuPool for address {value:x}"),
-        }
+        Self::iter()
+            .find(|pool| &pool.pool_address() == value)
+            .with_context(|| format!("Unknown VesuPool for address {value:#x}"))
     }
 }

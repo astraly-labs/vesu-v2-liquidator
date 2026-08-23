@@ -2,14 +2,15 @@ pub mod ekubo;
 pub mod task;
 
 use std::collections::HashMap;
-use std::hash::{Hash, Hasher};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
-use evian::{utils::indexer::handler::StarknetEventMetadata, vesu::v2::data::VesuDataClient};
+use evian::{
+    utils::starknet_indexer::handler::StarknetEventMetadata, vesu_v2::data::VesuDataClient,
+};
 use pragma_common::starknet::{FallbackProvider, StarknetNetwork};
-use starknet::core::types::Felt;
-use starknet::macros::felt_hex;
+use starknet_rust::core::types::Felt;
+use starknet_rust::macros::felt_hex;
 use tokio::sync::{mpsc, oneshot};
 
 use crate::bindings::liquidate::Liquidate;
@@ -17,12 +18,16 @@ use crate::services::indexer::PositionDelta;
 use crate::services::oracle::vesu_prices::VESU_PRICES;
 use crate::types::account::StarknetSingleOwnerAccount;
 use crate::types::pool::PoolName;
+use crate::types::position::PositionKey;
 use crate::types::{account::StarknetAccount, position::VesuPosition};
 
 pub struct MonitoringService {
     pub vesu_client: Arc<VesuDataClient<FallbackProvider>>,
     pub rx_from_indexer: mpsc::UnboundedReceiver<(StarknetEventMetadata, PositionDelta)>,
-    pub current_positions: HashMap<(PoolName, String), VesuPosition>,
+    pub current_positions: HashMap<PositionKey, VesuPosition>,
+    /// Cooldown per position after a failed liquidation, so a position that keeps
+    /// reverting is not retried on every tick forever.
+    retry_after: HashMap<PositionKey, (Instant, Duration)>,
     wait_for_indexer: Option<oneshot::Receiver<()>>,
     liquidate_contract: Arc<Liquidate<StarknetSingleOwnerAccount>>,
     account: StarknetAccount,
@@ -42,6 +47,7 @@ impl MonitoringService {
             vesu_client: Arc::new(VesuDataClient::new(StarknetNetwork::Mainnet, provider)),
             rx_from_indexer,
             current_positions: HashMap::new(),
+            retry_after: HashMap::new(),
             wait_for_indexer: Some(wait_for_indexer),
             liquidate_contract: Arc::new(Liquidate::new(
                 LIQUIDATE_CONTRACT_ADDRESS,
@@ -52,49 +58,63 @@ impl MonitoringService {
     }
 
     pub async fn run_forever(mut self) -> anyhow::Result<()> {
+        const FIRST_PRICES_TIMEOUT: Duration = Duration::from_secs(60);
+
         tracing::info!("[🔭 Monitoring] Waiting for first vesu prices");
-        VESU_PRICES.wait_for_first_prices().await;
+        VESU_PRICES
+            .wait_for_first_prices(FIRST_PRICES_TIMEOUT)
+            .await;
 
         let wait_for_indexer = self
             .wait_for_indexer
             .take()
             .expect("wait_for_indexer should be present in the Option. The task is ran only once!");
 
+        // `Burst` (the default) would replay every tick missed while a liquidation
+        // pass was running, back to back and with no pacing.
         let mut interval = tokio::time::interval(Duration::from_secs(10));
+        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
 
         loop {
             tokio::select! {
                 maybe_msg = self.rx_from_indexer.recv() => {
-                    if let Some((metadata, event)) = maybe_msg {
-                        tracing::info!("[🔭 Monitoring] Processing new event from block #{}", metadata.block_number);
+                    // A closed channel means the indexer is gone: without this the arm
+                    // would resolve instantly forever and spin the loop on a core.
+                    let Some((metadata, event)) = maybe_msg else {
+                        anyhow::bail!("[🔭 Monitoring] The indexer channel closed");
+                    };
 
-                        let pool = PoolName::try_from(&metadata.from_address)?;
-                        let position_key = Self::compute_position_key(metadata.from_address, &event);
+                    tracing::info!("[🔭 Monitoring] Processing new event from block #{}", metadata.block_number);
 
-                        if let Some(position) = self.current_positions.get_mut(&(pool, position_key.clone())) {
-                            position.update_from_delta(event);
-                        } else {
-                            match VesuPosition::new(&metadata, &self.vesu_client, event).await {
-                                Ok(position) => {
-                                    self.current_positions.insert((pool, position.position_id()), position);
-                                }
-                                Err(e) => {
-                                    tracing::error!("[🔭 Monitoring] Could not new create position: {e}");
-                                }
-                            };
+                    let pool = match PoolName::try_from(&metadata.from_address) {
+                        Ok(pool) => pool,
+                        Err(e) => {
+                            tracing::error!("[🔭 Monitoring] Ignoring event from an unknown pool: {e}");
+                            continue;
                         }
+                    };
+                    let position_key = PositionKey::from_delta(pool, &event);
 
-                        let to_close = if let Some(position) = self.current_positions.get(&(pool, position_key.clone())) {
-                            position.is_closed()
-                        } else {
-                            false
-                        };
-
-                        if to_close {
-                            self.current_positions.remove(&(pool, position_key));
+                    if let Some(position) = self.current_positions.get_mut(&position_key) {
+                        position.update_from_delta(event);
+                    } else {
+                        match VesuPosition::new(&metadata, &self.vesu_client, event).await {
+                            Ok(position) => {
+                                self.current_positions.insert(position.key(), position);
+                            }
+                            Err(e) => {
+                                tracing::error!("[🔭 Monitoring] Could not create new position: {e}");
+                            }
                         }
+                    }
 
-
+                    if self
+                        .current_positions
+                        .get(&position_key)
+                        .is_some_and(VesuPosition::is_closed)
+                    {
+                        self.current_positions.remove(&position_key);
+                        self.retry_after.remove(&position_key);
                     }
                 },
                 _ = interval.tick() => {
@@ -102,50 +122,77 @@ impl MonitoringService {
                         continue;
                     }
 
-                    for p in self.current_positions.values() {
-                        if p.is_closed() {
+                    // Collected first: liquidating borrows `self`, and the cooldown map
+                    // is written right after each attempt.
+                    let now = Instant::now();
+                    let due: Vec<PositionKey> = self
+                        .current_positions
+                        .iter()
+                        .filter(|(key, position)| {
+                            !position.is_closed()
+                                && self.retry_after.get(*key).is_none_or(|(until, _)| now >= *until)
+                                && position.is_liquidable()
+                        })
+                        .map(|(key, _)| *key)
+                        .collect();
+
+                    for key in due {
+                        // Re-checked here, not just in the filter above: an earlier
+                        // liquidation in this batch can take minutes, and prices refresh
+                        // every 10s. Never submit on a verdict from a previous batch.
+                        let Some(position) = self
+                            .current_positions
+                            .get(&key)
+                            .filter(|position| !position.is_closed() && position.is_liquidable())
+                            .cloned()
+                        else {
                             continue;
-                        }
+                        };
 
-                        if p.is_liquidable() {
-                            tracing::info!(
-                                "[🔭 Monitoring] 🔫 Liquidating {p}",
-                            );
+                        tracing::info!("[🔭 Monitoring] 🔫 Liquidating {position}");
 
-                            if let Err(e) = self.liquidate_position(p).await {
-                                if e.to_string().contains("not-undercollateralized") {
-                                    tracing::warn!("[🔭 Monitoring] Position was not under collateralized!");
-                                } else {
-                                    tracing::error!(
-                                        error = %e,
-                                        "[🔭 Monitoring] 😨 Could not liquidate position",
-                                    );
-                                }
+                        match self.liquidate_position(&position).await {
+                            Ok(()) => {
+                                self.retry_after.remove(&key);
+                            }
+                            Err(e) if e.to_string().contains("not-undercollateralized") => {
+                                // A lost race, not a failure: someone liquidated first, or
+                                // the price recovered. Backing off here would blind us to
+                                // exactly the positions sitting on their threshold.
+                                tracing::warn!("[🔭 Monitoring] Position was not under collateralized!");
+                                self.retry_after.remove(&key);
+                            }
+                            Err(e) => {
+                                tracing::error!(
+                                    error = %e,
+                                    "[🔭 Monitoring] 😨 Could not liquidate position",
+                                );
+                                self.back_off(key);
                             }
                         }
-
-
                     }
-
                 }
             }
         }
     }
 
-    fn compute_position_key(from_address: Felt, position_event: &PositionDelta) -> String {
-        let mut hasher = std::hash::DefaultHasher::new();
-        vec![
-            from_address,
-            position_event.collateral_address,
-            position_event.debt_address,
-            position_event.user_address,
-        ]
-        .hash(&mut hasher);
-        hasher.finish().to_string()
+    /// Doubles this position's cooldown, so a position that keeps failing stops
+    /// costing an Ekubo quote and a fee estimate on every tick.
+    fn back_off(&mut self, key: PositionKey) {
+        const MIN_BACKOFF: Duration = Duration::from_secs(30);
+        const MAX_BACKOFF: Duration = Duration::from_secs(15 * 60);
+
+        let delay = match self.retry_after.get(&key) {
+            Some((_, previous)) => (*previous * 2).min(MAX_BACKOFF),
+            None => MIN_BACKOFF,
+        };
+        tracing::warn!("[🔭 Monitoring] Backing off this position for {delay:?}");
+        self.retry_after
+            .insert(key, (Instant::now() + delay, delay));
     }
 
     async fn liquidate_position(&self, position: &VesuPosition) -> anyhow::Result<()> {
-        let started_at = std::time::Instant::now();
+        let started_at = Instant::now();
 
         let liquidation_tx = position
             .get_vesu_liquidate_tx(&self.liquidate_contract, &self.account.account_address())
@@ -154,8 +201,7 @@ impl MonitoringService {
         let tx_hash = self.account.execute_txs(&[liquidation_tx]).await?;
 
         tracing::info!(
-            "[🔭 Monitoring] ✅ Liquidated position #{}! (tx {tx_hash:#064x}) - ⌛ {:?}",
-            position.position_id(),
+            "[🔭 Monitoring] ✅ Liquidated {position}! (tx {tx_hash:#064x}) - ⌛ {:?}",
             started_at.elapsed()
         );
         Ok(())

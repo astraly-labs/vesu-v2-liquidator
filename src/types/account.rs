@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use anyhow::Result;
 use pragma_common::starknet::FallbackProvider;
-use starknet::{
+use starknet_rust::{
     accounts::{Account, ExecutionEncoding, SingleOwnerAccount},
     core::{
         chain_id,
@@ -67,19 +67,11 @@ pub struct StarknetAccountBuilder {
 }
 
 impl StarknetAccountBuilder {
-    pub fn new() -> Self {
-        StarknetAccountBuilder::default()
-    }
-
     pub fn on_mainnet(mut self) -> Self {
         self.chain_id = Some(chain_id::MAINNET);
         self
     }
 
-    pub fn on_sepolia(mut self) -> Self {
-        self.chain_id = Some(chain_id::SEPOLIA);
-        self
-    }
     pub fn as_account(mut self, account_address: Felt) -> Self {
         self.account_address = Some(account_address);
         self

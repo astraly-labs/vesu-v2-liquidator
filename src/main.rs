@@ -7,7 +7,6 @@ pub mod utils;
 
 use clap::Parser;
 use pragma_common::services::{Service, ServiceGroup};
-use pragma_common::starknet::FallbackProvider;
 use pragma_common::telemetry::init_telemetry;
 use tokio::sync::{mpsc, oneshot};
 
@@ -16,6 +15,7 @@ use crate::services::indexer::task::IndexerTask;
 use crate::services::monitoring::task::MonitoringTask;
 use crate::services::oracle::task::OracleTask;
 use crate::types::account::StarknetAccount;
+use crate::utils::{HTTP_REQUEST_TIMEOUT, build_provider};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -28,19 +28,21 @@ async fn main() -> anyhow::Result<()> {
 
     print_app_title();
 
-    let provider = FallbackProvider::new(vec![
-        run_cmd.rpc_url.clone(),
-        "https://api.cartridge.gg/x/starknet/mainnet"
-            .parse()
-            .expect("Coudlnt parse Cartridge RPC URL?"),
-        "https://rpc.pathfinder.equilibrium.co/mainnet/rpc/v0_9"
-            .parse()
-            .expect("Coudlnt parse Equilibrium RPC URL?"),
-        "https://rpc.starknet.lava.build/rpc/v0_9"
-            .parse()
-            .expect("Could not parse Lava RPC URL?"),
-    ])
-    .expect("Could not init the Starknet provider");
+    let provider = build_provider(
+        vec![
+            run_cmd.rpc_url.clone(),
+            "https://api.cartridge.gg/x/starknet/mainnet"
+                .parse()
+                .expect("Coudlnt parse Cartridge RPC URL?"),
+            "https://rpc.pathfinder.equilibrium.co/mainnet/rpc/v0_9"
+                .parse()
+                .expect("Coudlnt parse Equilibrium RPC URL?"),
+            "https://rpc.starknet.lava.build/rpc/v0_9"
+                .parse()
+                .expect("Could not parse Lava RPC URL?"),
+        ],
+        HTTP_REQUEST_TIMEOUT,
+    )?;
 
     let account = StarknetAccount::from_cli(provider.clone(), run_cmd.clone())?;
 
@@ -61,9 +63,9 @@ async fn main() -> anyhow::Result<()> {
         MonitoringTask::new(account, provider.clone(), rx_from_indexer, wait_for_indexer);
 
     ServiceGroup::default()
-        .with(oracle_service)
-        .with(indexer_service)
-        .with(monitoring_service)
+        .with_critical(oracle_service)
+        .with_critical(indexer_service)
+        .with_critical(monitoring_service)
         .start_and_drive_to_end()
         .await?;
 

@@ -14,7 +14,6 @@ data.json
 # Indexer
 indexer.log
 run_indexer.sh
-src/bindings
 
 # Data
 vesu.json

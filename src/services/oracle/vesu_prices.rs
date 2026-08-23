@@ -36,20 +36,59 @@ impl VesuOraclePrices {
             return Decimal::ONE;
         }
 
-        self.0.get(&ONCHAIN_ASSETS[ticker]).map(|t| *t).expect(
-            "Every ticker in our Vesu Prices must have a price. See `wait_for_first_prices`.",
-        )
+        self.0
+            .get(&ONCHAIN_ASSETS[ticker])
+            .map(|price| *price)
+            .unwrap_or_else(|| panic!("{ticker} is missing from config/assets.toml"))
     }
 
-    /// Wait until the first prices are populated.
-    pub async fn wait_for_first_prices(&self) {
+    /// Waits until every asset has a price, giving up after `timeout`.
+    ///
+    /// The Vesu oracle does not necessarily price every asset listed in
+    /// `assets.toml`, and waiting for all of them unconditionally stalls the caller
+    /// forever. Positions using an unpriced asset are skipped by
+    /// `VesuPosition::is_liquidable` instead.
+    pub async fn wait_for_first_prices(&self, timeout: Duration) {
         const CHECK_INTERVAL: Duration = Duration::from_secs(2);
 
-        loop {
-            if self.0.iter().all(|t| !t.is_zero()) {
-                return;
+        let all_priced = async {
+            loop {
+                if self.0.iter().all(|t| !t.is_zero()) {
+                    return;
+                }
+                tokio::time::sleep(CHECK_INTERVAL).await;
             }
-            tokio::time::sleep(CHECK_INTERVAL).await;
+        };
+
+        if tokio::time::timeout(timeout, all_priced).await.is_err() {
+            let unpriced: Vec<String> = self
+                .0
+                .iter()
+                .filter(|entry| entry.is_zero())
+                .map(|entry| entry.key().ticker.clone())
+                .collect();
+            tracing::warn!(
+                "[🔮 Oracle] No Vesu price for {unpriced:?} after {timeout:?}; positions using them will be skipped"
+            );
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The Vesu oracle does not price every configured asset, so this must return
+    /// instead of stalling the monitoring service forever.
+    #[tokio::test]
+    async fn wait_for_first_prices_gives_up_on_unpriced_assets() {
+        let prices = VesuOraclePrices::new();
+
+        tokio::time::timeout(
+            Duration::from_secs(10),
+            prices.wait_for_first_prices(Duration::from_millis(50)),
+        )
+        .await
+        .expect("must not wait for a price that never comes");
     }
 }

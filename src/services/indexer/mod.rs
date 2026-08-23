@@ -4,8 +4,8 @@ use std::{collections::HashSet, sync::Arc};
 
 use anyhow::Result;
 use evian::{
-    utils::indexer::handler::{OutputEvent, StarknetEventMetadata},
-    vesu::v2::data::{
+    utils::starknet_indexer::handler::{OutputEvent, StarknetEventMetadata},
+    vesu_v2::data::{
         VesuDataClient,
         indexer::{
             VesuDataIndexer,
@@ -15,7 +15,7 @@ use evian::{
 };
 use pragma_common::starknet::{StarknetNetwork, fallback_provider::FallbackProvider};
 use rust_decimal::Decimal;
-use starknet::core::types::Felt;
+use starknet_rust::core::types::Felt;
 use tokio::sync::{mpsc, oneshot};
 
 use crate::types::{currency::Currency, pool::PoolName};
@@ -121,80 +121,134 @@ impl IndexerService {
     }
 
     /// Returns all the v2 pools monitored by the liquidation bot.
-    /// Source: https://vesu.xyz/borrow
     fn monitored_pools() -> HashSet<PoolDetails> {
-        [
-            PoolName::Re7USDCCore.pool_details(Currency::uniBTC, Currency::USDC),
-            PoolName::Re7USDCCore.pool_details(Currency::LBTC, Currency::USDC),
-            PoolName::Re7USDCCore.pool_details(Currency::tBTC, Currency::USDC),
-            PoolName::Re7USDCCore.pool_details(Currency::solvBTC, Currency::USDC),
-            PoolName::Re7USDCCore.pool_details(Currency::xWBTC, Currency::USDC),
-            PoolName::Re7USDCCore.pool_details(Currency::xLBTC, Currency::USDC),
-            PoolName::Re7USDCCore.pool_details(Currency::xsBTC, Currency::USDC),
-            PoolName::Re7USDCCore.pool_details(Currency::xtBTC, Currency::USDC),
-            PoolName::Re7USDCCore.pool_details(Currency::WBTC, Currency::USDC),
-            PoolName::Re7USDCPrime.pool_details(Currency::WBTC, Currency::USDC),
-            PoolName::Re7xBTC.pool_details(Currency::xtBTC, Currency::solvBTC),
-            PoolName::Re7xBTC.pool_details(Currency::mRe7BTC, Currency::solvBTC),
-            PoolName::Re7xBTC.pool_details(Currency::xsBTC, Currency::solvBTC),
-            PoolName::Re7xBTC.pool_details(Currency::xWBTC, Currency::solvBTC),
-            PoolName::Re7xBTC.pool_details(Currency::xLBTC, Currency::solvBTC),
-            PoolName::Re7xBTC.pool_details(Currency::xtBTC, Currency::tBTC),
-            PoolName::Re7xBTC.pool_details(Currency::mRe7BTC, Currency::tBTC),
-            PoolName::Re7xBTC.pool_details(Currency::xsBTC, Currency::tBTC),
-            PoolName::Re7xBTC.pool_details(Currency::xWBTC, Currency::tBTC),
-            PoolName::Re7xBTC.pool_details(Currency::xLBTC, Currency::tBTC),
-            PoolName::Re7xBTC.pool_details(Currency::xtBTC, Currency::LBTC),
-            PoolName::Re7xBTC.pool_details(Currency::mRe7BTC, Currency::LBTC),
-            PoolName::Re7xBTC.pool_details(Currency::xsBTC, Currency::LBTC),
-            PoolName::Re7xBTC.pool_details(Currency::xWBTC, Currency::LBTC),
-            PoolName::Re7xBTC.pool_details(Currency::xtBTC, Currency::WBTC),
-            PoolName::Re7xBTC.pool_details(Currency::mRe7BTC, Currency::WBTC),
-            PoolName::Re7xBTC.pool_details(Currency::xsBTC, Currency::WBTC),
-            PoolName::Re7xBTC.pool_details(Currency::xWBTC, Currency::WBTC),
-            PoolName::Re7xBTC.pool_details(Currency::xLBTC, Currency::WBTC),
-            PoolName::Re7xBTC.pool_details(Currency::xLBTC, Currency::LBTC),
-            PoolName::Re7USDCFrontier.pool_details(Currency::YBTC_B, Currency::USDC),
-            PoolName::Re7USDCStableCore.pool_details(Currency::mRe7YIELD, Currency::USDC),
-            PoolName::Re7USDCStableCore.pool_details(Currency::sUSN, Currency::USDC),
-            PoolName::Prime.pool_details(Currency::wstETH, Currency::ETH),
-            PoolName::Prime.pool_details(Currency::WBTC, Currency::ETH),
+        Self::monitored_pairs().into_iter().collect()
+    }
+
+    /// Every configured pair of the live v2 pools.
+    ///
+    /// Source: `https://api.vesu.xyz/pools`. A duplicate here would be swallowed
+    /// silently by `monitored_pools`, hence `monitored_pairs_are_unique`.
+    fn monitored_pairs() -> Vec<PoolDetails> {
+        vec![
+            // Prime — 48 pairs
             PoolName::Prime.pool_details(Currency::STRK, Currency::ETH),
             PoolName::Prime.pool_details(Currency::USDC, Currency::ETH),
+            PoolName::Prime.pool_details(Currency::USDC_E, Currency::ETH),
             PoolName::Prime.pool_details(Currency::USDT, Currency::ETH),
-            PoolName::Prime.pool_details(Currency::wstETH, Currency::STRK),
-            PoolName::Prime.pool_details(Currency::WBTC, Currency::STRK),
+            PoolName::Prime.pool_details(Currency::WBTC, Currency::ETH),
+            PoolName::Prime.pool_details(Currency::wstETH, Currency::ETH),
             PoolName::Prime.pool_details(Currency::ETH, Currency::STRK),
             PoolName::Prime.pool_details(Currency::USDC, Currency::STRK),
+            PoolName::Prime.pool_details(Currency::USDC_E, Currency::STRK),
             PoolName::Prime.pool_details(Currency::USDT, Currency::STRK),
-            PoolName::Prime.pool_details(Currency::wstETH, Currency::USDC),
-            PoolName::Prime.pool_details(Currency::WBTC, Currency::USDC),
-            PoolName::Prime.pool_details(Currency::STRK, Currency::USDC),
-            PoolName::Prime.pool_details(Currency::ETH, Currency::USDC),
-            PoolName::Prime.pool_details(Currency::USDT, Currency::USDC),
-            PoolName::Prime.pool_details(Currency::wstETH, Currency::USDT),
-            PoolName::Prime.pool_details(Currency::WBTC, Currency::USDT),
-            PoolName::Prime.pool_details(Currency::STRK, Currency::USDT),
-            PoolName::Prime.pool_details(Currency::ETH, Currency::USDT),
-            PoolName::Prime.pool_details(Currency::USDC, Currency::USDT),
-            PoolName::Prime.pool_details(Currency::wstETH, Currency::WBTC),
-            PoolName::Prime.pool_details(Currency::STRK, Currency::WBTC),
-            PoolName::Prime.pool_details(Currency::ETH, Currency::WBTC),
-            PoolName::Prime.pool_details(Currency::USDC, Currency::WBTC),
-            PoolName::Prime.pool_details(Currency::USDT, Currency::WBTC),
-            PoolName::Prime.pool_details(Currency::WBTC, Currency::wstETH),
-            PoolName::Prime.pool_details(Currency::STRK, Currency::wstETH),
-            PoolName::Prime.pool_details(Currency::ETH, Currency::wstETH),
-            PoolName::Prime.pool_details(Currency::USDC, Currency::wstETH),
-            PoolName::Prime.pool_details(Currency::USDT, Currency::wstETH),
-            PoolName::Prime.pool_details(Currency::xSTRK, Currency::USDC),
+            PoolName::Prime.pool_details(Currency::WBTC, Currency::STRK),
+            PoolName::Prime.pool_details(Currency::wstETH, Currency::STRK),
             PoolName::Prime.pool_details(Currency::xSTRK, Currency::STRK),
-            PoolName::Prime.pool_details(Currency::xSTRK, Currency::USDT),
+            PoolName::Prime.pool_details(Currency::ETH, Currency::USDC),
+            PoolName::Prime.pool_details(Currency::STRK, Currency::USDC),
+            PoolName::Prime.pool_details(Currency::USDT, Currency::USDC),
+            PoolName::Prime.pool_details(Currency::WBTC, Currency::USDC),
+            PoolName::Prime.pool_details(Currency::wstETH, Currency::USDC),
+            PoolName::Prime.pool_details(Currency::xSTRK, Currency::USDC),
             PoolName::Prime.pool_details(Currency::xWBTC, Currency::USDC),
-            PoolName::Prime.pool_details(Currency::xWBTC, Currency::WBTC),
+            PoolName::Prime.pool_details(Currency::ETH, Currency::USDC_E),
+            PoolName::Prime.pool_details(Currency::STRK, Currency::USDC_E),
+            PoolName::Prime.pool_details(Currency::USDT, Currency::USDC_E),
+            PoolName::Prime.pool_details(Currency::WBTC, Currency::USDC_E),
+            PoolName::Prime.pool_details(Currency::wstETH, Currency::USDC_E),
+            PoolName::Prime.pool_details(Currency::xSTRK, Currency::USDC_E),
+            PoolName::Prime.pool_details(Currency::xWBTC, Currency::USDC_E),
+            PoolName::Prime.pool_details(Currency::ETH, Currency::USDT),
+            PoolName::Prime.pool_details(Currency::STRK, Currency::USDT),
+            PoolName::Prime.pool_details(Currency::USDC, Currency::USDT),
+            PoolName::Prime.pool_details(Currency::USDC_E, Currency::USDT),
+            PoolName::Prime.pool_details(Currency::WBTC, Currency::USDT),
+            PoolName::Prime.pool_details(Currency::wstETH, Currency::USDT),
+            PoolName::Prime.pool_details(Currency::xSTRK, Currency::USDT),
             PoolName::Prime.pool_details(Currency::xWBTC, Currency::USDT),
+            PoolName::Prime.pool_details(Currency::ETH, Currency::WBTC),
+            PoolName::Prime.pool_details(Currency::STRK, Currency::WBTC),
+            PoolName::Prime.pool_details(Currency::USDC, Currency::WBTC),
+            PoolName::Prime.pool_details(Currency::USDC_E, Currency::WBTC),
+            PoolName::Prime.pool_details(Currency::USDT, Currency::WBTC),
+            PoolName::Prime.pool_details(Currency::wstETH, Currency::WBTC),
+            PoolName::Prime.pool_details(Currency::xWBTC, Currency::WBTC),
+            PoolName::Prime.pool_details(Currency::ETH, Currency::wstETH),
+            PoolName::Prime.pool_details(Currency::STRK, Currency::wstETH),
+            PoolName::Prime.pool_details(Currency::USDC, Currency::wstETH),
+            PoolName::Prime.pool_details(Currency::USDC_E, Currency::wstETH),
+            PoolName::Prime.pool_details(Currency::USDT, Currency::wstETH),
+            PoolName::Prime.pool_details(Currency::WBTC, Currency::wstETH),
+            // Re7 USDC Prime — 3 pairs
+            PoolName::Re7USDCPrime.pool_details(Currency::strkBTC, Currency::USDC),
+            PoolName::Re7USDCPrime.pool_details(Currency::WBTC, Currency::USDC),
+            PoolName::Re7USDCPrime.pool_details(Currency::WBTC, Currency::USDC_E),
+            // Re7 USDC Core — 14 pairs
+            PoolName::Re7USDCCore.pool_details(Currency::LBTC, Currency::USDC),
+            PoolName::Re7USDCCore.pool_details(Currency::solvBTC, Currency::USDC),
+            PoolName::Re7USDCCore.pool_details(Currency::tBTC, Currency::USDC),
+            PoolName::Re7USDCCore.pool_details(Currency::uniBTC, Currency::USDC),
+            PoolName::Re7USDCCore.pool_details(Currency::WBTC, Currency::USDC),
+            PoolName::Re7USDCCore.pool_details(Currency::xLBTC, Currency::USDC),
+            PoolName::Re7USDCCore.pool_details(Currency::xsBTC, Currency::USDC),
+            PoolName::Re7USDCCore.pool_details(Currency::xstrkBTC, Currency::USDC),
+            PoolName::Re7USDCCore.pool_details(Currency::xtBTC, Currency::USDC),
+            PoolName::Re7USDCCore.pool_details(Currency::xWBTC, Currency::USDC),
+            PoolName::Re7USDCCore.pool_details(Currency::LBTC, Currency::USDC_E),
+            PoolName::Re7USDCCore.pool_details(Currency::solvBTC, Currency::USDC_E),
+            PoolName::Re7USDCCore.pool_details(Currency::tBTC, Currency::USDC_E),
+            PoolName::Re7USDCCore.pool_details(Currency::uniBTC, Currency::USDC_E),
+            // Re7 xBTC — 24 pairs
+            PoolName::Re7xBTC.pool_details(Currency::mRe7BTC, Currency::LBTC),
+            PoolName::Re7xBTC.pool_details(Currency::xLBTC, Currency::LBTC),
+            PoolName::Re7xBTC.pool_details(Currency::xsBTC, Currency::LBTC),
+            PoolName::Re7xBTC.pool_details(Currency::xtBTC, Currency::LBTC),
+            PoolName::Re7xBTC.pool_details(Currency::xWBTC, Currency::LBTC),
+            PoolName::Re7xBTC.pool_details(Currency::mRe7BTC, Currency::solvBTC),
+            PoolName::Re7xBTC.pool_details(Currency::xLBTC, Currency::solvBTC),
+            PoolName::Re7xBTC.pool_details(Currency::xsBTC, Currency::solvBTC),
+            PoolName::Re7xBTC.pool_details(Currency::xtBTC, Currency::solvBTC),
+            PoolName::Re7xBTC.pool_details(Currency::xWBTC, Currency::solvBTC),
+            PoolName::Re7xBTC.pool_details(Currency::xstrkBTC, Currency::strkBTC),
+            PoolName::Re7xBTC.pool_details(Currency::xtBTC, Currency::strkBTC),
+            PoolName::Re7xBTC.pool_details(Currency::xWBTC, Currency::strkBTC),
+            PoolName::Re7xBTC.pool_details(Currency::mRe7BTC, Currency::tBTC),
+            PoolName::Re7xBTC.pool_details(Currency::xLBTC, Currency::tBTC),
+            PoolName::Re7xBTC.pool_details(Currency::xsBTC, Currency::tBTC),
+            PoolName::Re7xBTC.pool_details(Currency::xtBTC, Currency::tBTC),
+            PoolName::Re7xBTC.pool_details(Currency::xWBTC, Currency::tBTC),
+            PoolName::Re7xBTC.pool_details(Currency::mRe7BTC, Currency::WBTC),
+            PoolName::Re7xBTC.pool_details(Currency::xLBTC, Currency::WBTC),
+            PoolName::Re7xBTC.pool_details(Currency::xsBTC, Currency::WBTC),
+            PoolName::Re7xBTC.pool_details(Currency::xstrkBTC, Currency::WBTC),
+            PoolName::Re7xBTC.pool_details(Currency::xtBTC, Currency::WBTC),
+            PoolName::Re7xBTC.pool_details(Currency::xWBTC, Currency::WBTC),
+            // Re7 USDC Stable Core — 3 pairs
+            PoolName::Re7USDCStableCore.pool_details(Currency::mRe7YIELD, Currency::USDC),
+            PoolName::Re7USDCStableCore.pool_details(Currency::sUSN, Currency::USDC),
+            PoolName::Re7USDCStableCore.pool_details(Currency::mRe7YIELD, Currency::USDC_E),
+            // Re7 USDC Frontier — 1 pairs
+            PoolName::Re7USDCFrontier.pool_details(Currency::YBTC_B, Currency::USDC_E),
+            // Re7 ETH — 1 pairs
+            PoolName::Re7ETH.pool_details(Currency::wstETH, Currency::ETH),
+            // Re7 STRK — 1 pairs
+            PoolName::Re7STRK.pool_details(Currency::xSTRK, Currency::STRK),
+            // Clearstar USDC Reactor — 10 pairs
+            PoolName::ClearstarUSDCReactor.pool_details(Currency::xstrkBTC, Currency::strkBTC),
+            PoolName::ClearstarUSDCReactor.pool_details(Currency::USDC, Currency::tBTC),
+            PoolName::ClearstarUSDCReactor.pool_details(Currency::solvBTC, Currency::USDC),
+            PoolName::ClearstarUSDCReactor.pool_details(Currency::strkBTC, Currency::USDC),
+            PoolName::ClearstarUSDCReactor.pool_details(Currency::sUSN, Currency::USDC),
+            PoolName::ClearstarUSDCReactor.pool_details(Currency::tBTC, Currency::USDC),
+            PoolName::ClearstarUSDCReactor.pool_details(Currency::WBTC, Currency::USDC),
+            PoolName::ClearstarUSDCReactor.pool_details(Currency::xstrkBTC, Currency::USDC),
+            PoolName::ClearstarUSDCReactor.pool_details(Currency::USDC, Currency::WBTC),
+            PoolName::ClearstarUSDCReactor.pool_details(Currency::xstrkBTC, Currency::WBTC),
+            // Re7 Labs Starknet Ecosystem — 2 pairs
+            PoolName::Re7LabsStarknetEcosystem.pool_details(Currency::EKUBO, Currency::USDC),
+            PoolName::Re7LabsStarknetEcosystem.pool_details(Currency::STRK, Currency::USDC),
         ]
-        .into()
     }
 }
 
@@ -219,5 +273,23 @@ impl From<LiquidatePositionEvent> for PositionDelta {
             collateral_delta: value.collateral_delta,
             debt_delta: value.debt_delta,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Also proves every `Currency` used by a pair is present in `assets.toml`:
+    /// `Currency::address` panics otherwise.
+    #[test]
+    fn monitored_pairs_are_unique() {
+        let pairs = IndexerService::monitored_pairs();
+
+        assert_eq!(
+            pairs.len(),
+            IndexerService::monitored_pools().len(),
+            "a duplicated pair is silently swallowed by the HashSet"
+        );
     }
 }

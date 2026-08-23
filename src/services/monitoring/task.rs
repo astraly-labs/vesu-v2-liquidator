@@ -1,4 +1,4 @@
-use evian::utils::indexer::handler::StarknetEventMetadata;
+use evian::utils::starknet_indexer::handler::StarknetEventMetadata;
 use pragma_common::{
     services::{Service, ServiceRunner},
     starknet::FallbackProvider,

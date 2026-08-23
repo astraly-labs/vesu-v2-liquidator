@@ -4,7 +4,7 @@ use std::{
 };
 
 use serde::{Deserialize, Serialize};
-use starknet::core::types::Felt;
+use starknet_rust::core::types::Felt;
 
 use crate::types::currency::Currency;
 
@@ -61,14 +61,6 @@ impl OnchainAssets {
             by_address,
             assets: assets_config.assets,
         }
-    }
-
-    pub fn get_by_ticker(&self, ticker: &str) -> Option<&OnchainAssetConfig> {
-        self.by_ticker.get(ticker)
-    }
-
-    pub fn get_by_address(&self, address: &Felt) -> Option<&OnchainAssetConfig> {
-        self.by_address.get(address)
     }
 
     pub fn all(&self) -> Vec<OnchainAssetConfig> {
