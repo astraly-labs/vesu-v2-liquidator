@@ -1,20 +1,19 @@
 use std::hash::Hash;
-use std::hash::Hasher;
 use std::str::FromStr;
 use std::sync::Arc;
 
 use cainome::cairo_serde::U256;
 use colored::Colorize;
-use evian::utils::indexer::handler::StarknetEventMetadata;
-use evian::vesu::v2::data::VesuDataClient;
+use evian::utils::starknet_indexer::handler::StarknetEventMetadata;
+use evian::vesu_v2::data::VesuDataClient;
 use num_traits::Pow;
 use pragma_common::starknet::fallback_provider::FallbackProvider;
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 use serde::Deserialize;
 use serde::Serialize;
-use starknet::core::types::Call;
-use starknet::core::types::Felt;
+use starknet_rust::core::types::Call;
+use starknet_rust::core::types::Felt;
 
 use crate::bindings::liquidate::Liquidate;
 use crate::bindings::liquidate::LiquidateParams;
@@ -26,6 +25,31 @@ use crate::types::currency::Currency;
 use crate::types::pool::PoolName;
 
 const VESU_SCALE: Decimal = dec!(18);
+
+/// Identity of a Vesu position: a pool, an asset pair and a user.
+///
+/// Vesu v2 keys positions by exactly this tuple. Deriving `Hash` replaces the two
+/// hand-rolled hashes this code used to compute — one from the raw indexer event,
+/// one from the built position — which agreed only by accident.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub struct PositionKey {
+    pub pool: PoolName,
+    pub collateral: Felt,
+    pub debt: Felt,
+    pub user: Felt,
+}
+
+impl PositionKey {
+    /// Builds the key straight from an indexer event.
+    pub fn from_delta(pool: PoolName, delta: &PositionDelta) -> Self {
+        Self {
+            pool,
+            collateral: delta.collateral_address,
+            debt: delta.debt_address,
+            user: delta.user_address,
+        }
+    }
+}
 
 #[derive(Clone, Hash, Eq, PartialEq, Debug, Serialize, Deserialize)]
 pub struct VesuPosition {
@@ -102,33 +126,14 @@ impl VesuPosition {
         self.collateral.amount.is_zero() || self.collateral.amount.is_sign_negative()
     }
 
-    /// Returns the position id.
-    /// It is NOT unique accross multiple positions of the same pool & assets!
-    pub fn position_id(&self) -> String {
-        let mut hasher = std::hash::DefaultHasher::new();
-        let data = vec![
-            self.pool_name.pool_address(),
-            self.collateral.address,
-            self.debt.address,
-            self.user_address,
-        ];
-        data.hash(&mut hasher);
-        hasher.finish().to_string()
-    }
-
-    /// Computes the liquidation price in USD for the collateral asset.
-    /// The position gets liquidated when the collateral price drops to this value.
-    /// Formula: (debt_amount * debt_price) / (collateral_amount * lltv)
-    pub fn liquidation_price(&self) -> Decimal {
-        let debt_price = self.debt.currency.price();
-        (self.debt.amount * debt_price) / (self.collateral.amount * self.lltv)
-    }
-
-    /// Returns the position value in usd.
-    pub fn value_in_usd(&self) -> Decimal {
-        let collateral_value = self.collateral_value_in_usd();
-        let debt_value = self.debt_value_in_usd();
-        collateral_value - debt_value
+    /// Returns the identity of this position.
+    pub fn key(&self) -> PositionKey {
+        PositionKey {
+            pool: self.pool_name,
+            collateral: self.collateral.address,
+            debt: self.debt.address,
+            user: self.user_address,
+        }
     }
 
     /// Returns the collateral value in usd.
@@ -143,9 +148,13 @@ impl VesuPosition {
         self.debt.amount * debt_price
     }
 
-    /// Returns the current LTV.
-    pub fn ltv(&self) -> Decimal {
-        self.debt_value_in_usd() / self.collateral_value_in_usd()
+    /// Returns the current LTV, or `None` when the collateral is worth nothing.
+    ///
+    /// `Decimal` division panics on a zero divisor, so the guard belongs here and
+    /// not in the callers.
+    pub fn ltv(&self) -> Option<Decimal> {
+        let collateral_value = self.collateral_value_in_usd();
+        (!collateral_value.is_zero()).then(|| self.debt_value_in_usd() / collateral_value)
     }
 
     /// Check if the current position is liquidable.
@@ -157,12 +166,20 @@ impl VesuPosition {
             return false;
         }
 
-        let ltv_ratio = self.ltv();
-
-        // Avoid division by zero if collateral is zero
-        if ltv_ratio.is_zero() {
-            return !self.debt.amount.is_zero();
+        // A missing price makes the LTV meaningless. Never send a liquidation on it.
+        if self.collateral.currency.price().is_zero() || self.debt.currency.price().is_zero() {
+            tracing::warn!(
+                "[🔭 Monitoring] No {}/{} price, skipping {self}",
+                self.collateral.currency,
+                self.debt.currency,
+            );
+            return false;
         }
+
+        // `None` here means the collateral amount is zero: nothing left to seize.
+        let Some(ltv_ratio) = self.ltv() else {
+            return false;
+        };
 
         let is_liquidable = ltv_ratio >= self.lltv;
         let almost_liquidable_threshold = self.lltv - ALMOST_LIQUIDABLE_THRESHOLD;
@@ -234,6 +251,11 @@ pub struct Asset {
 }
 
 impl Asset {
+    /// Builds an asset from its on-chain address, which must be listed in
+    /// `config/assets.toml`.
+    ///
+    /// The address is kept verbatim: resolving it back through the ticker would
+    /// make `PositionKey` depend on that round trip staying an identity.
     pub fn from_address(address: Felt) -> Self {
         let config = &ONCHAIN_ASSETS[&address];
 
@@ -243,7 +265,7 @@ impl Asset {
         Self {
             name: config.name.clone(),
             decimals: currency.d_decimals(),
-            address: currency.address(),
+            address,
             currency,
             amount: Decimal::ZERO,
         }
@@ -262,8 +284,9 @@ impl std::fmt::Display for VesuPosition {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "Position #{} with {} {} of collateral and {} {} of debt",
-            self.position_id(),
+            "Position of {:#x} on {} with {} {} of collateral and {} {} of debt",
+            self.user_address,
+            self.pool_name,
             self.collateral
                 .amount
                 .round_dp(self.collateral.decimals.try_into().expect("Must fit")),
@@ -273,5 +296,43 @@ impl std::fmt::Display for VesuPosition {
                 .round_dp(self.debt.decimals.try_into().expect("Must fit")),
             self.debt.currency,
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// An unpriced asset must neither panic (`Decimal` division panics on a zero
+    /// divisor) nor be reported as liquidable on data we do not have.
+    #[test]
+    fn is_liquidable_skips_an_unpriced_position() {
+        // `VESU_PRICES` holds zeros until the oracle service fills it in.
+        let mut position = VesuPosition {
+            user_address: Felt::ONE,
+            pool_name: PoolName::Prime,
+            collateral: Asset::from_address(Currency::ETH.address()),
+            debt: Asset::from_address(Currency::USDC.address()),
+            lltv: dec!(0.8),
+        };
+        position.collateral.amount = dec!(1);
+        position.debt.amount = dec!(100);
+
+        assert_eq!(position.ltv(), None);
+        assert!(!position.is_liquidable());
+    }
+
+    /// `PositionKey` is built from raw event addresses on one side and from
+    /// `Asset::address` on the other. They must be the same value.
+    #[test]
+    fn asset_keeps_the_address_it_was_built_from() {
+        for asset in &ONCHAIN_ASSETS.all() {
+            assert_eq!(
+                Asset::from_address(asset.address).address,
+                asset.address,
+                "{} was rewritten while being resolved",
+                asset.ticker
+            );
+        }
     }
 }

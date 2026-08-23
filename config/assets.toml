@@ -113,13 +113,19 @@ decimals = 18
 address = "0x04be8945e61dc3e19ebadd1579a6bd53b262f51ba89e6f8b0c4bc9a7e3c633fc"
 
 [[assets]]
-name = "USN"
-ticker = "USN"
-decimals = 18
-address = "0x01e6545cab7ba4ac866768ba5e1bd540893762286ed3fea7f9c02bfa147e135b"
-
-[[assets]]
 name = "Staked USN"
 ticker = "sUSN"
 decimals = 18
 address = "0x02411565ef1a14decfbe83d2e987cced918cd752508a3d9c55deb67148d14d17"
+
+[[assets]]
+name = "strkBTC"
+ticker = "strkBTC"
+decimals = 8
+address = "0x787150e306e6eae6e3f79dea881770e8bbff2c1b8eb490f969669ee945b3135"
+
+[[assets]]
+name = "Endur xstrkBTC"
+ticker = "xstrkBTC"
+decimals = 8
+address = "0x47751b3532fabca89b0f2e35ca1cb45e5a7b11d5e3d3663dfa1f4406b45fd88"

@@ -9,7 +9,7 @@ description = "Liquidator bot for the Vesu v2 Protocol"
 readme = "README.md"
 
 [dependencies]
-evian = { version = "0.7.33", registry = "pragma", features = ["vesu_v2"] }
+evian = { version = "0.8.1", registry = "pragma", features = ["vesu_v2"] }
 pragma-common = { version = "0.6.4", features = [
   "telemetry",
   "serde",
@@ -21,11 +21,12 @@ pragma-common = { version = "0.6.4", features = [
 # Misc
 anyhow = "1.0"
 async-trait = "0.1"
-cainome = { version = "0.10.0", features = ["abigen-rs"] }
+cainome = "0.10.0"
 clap = { version = "4.5", features = ["derive", "env"] }
 colored = "2.1.0"
 dashmap = "6"
 dotenvy = "0.15.7"
+backon = "1.6"
 futures-util = "0.3.30"
 num-traits = "0.2"
 reqwest = { version = "0.12", features = ["json"] }
@@ -33,12 +34,13 @@ rust_decimal = { version = "1.37.1", features = [
   "serde",
   "serde-str",
   "maths",
-  "db-diesel-postgres",
 ] }
 rust_decimal_macros = "1.37.1"
 serde = "1.0"
 serde_json = "1.0"
-starknet = { version = "0.17.0" }
+# Must be the exact same crate as the one used by `evian` / `pragma-common`,
+# otherwise their `Provider`/`Account` impls are foreign types here.
+starknet-rust = "0.18.0"
 strum = { version = "0.27", features = ["derive"] }
 tokio = { version = "1.47", features = ["full"] }
 toml = "0.9.7"

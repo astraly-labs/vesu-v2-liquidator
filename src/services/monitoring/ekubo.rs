@@ -1,15 +1,42 @@
+use std::sync::LazyLock;
+use std::time::Duration;
+
 use anyhow::{Context, Result};
+use backon::{ExponentialBuilder, Retryable};
 use cainome::cairo_serde::{ContractAddress, U256};
 use num_traits::Pow;
 use rust_decimal::Decimal;
 use serde_json::Value;
-use starknet::core::types::Felt;
+use starknet_rust::core::types::Felt;
 
 use crate::bindings::liquidate::{I129, PoolKey, RouteNode, Swap, TokenAmount};
+use crate::utils::{HTTP_REQUEST_TIMEOUT, http_client};
 
 const EKUBO_QUOTE_ENDPOINT: &str = "https://quoter-mainnet-api.ekubo.org";
 const SCALE: u128 = 1_000_000_000_000_000_000;
 
+/// One shared client: a per-call `reqwest::Client` would leak a connection pool
+/// each time, and the default client has no timeout at all.
+static EKUBO_CLIENT: LazyLock<reqwest::Client> = LazyLock::new(|| {
+    http_client(HTTP_REQUEST_TIMEOUT).expect("Could not build the Ekubo HTTP client")
+});
+
+/// One HTTP round trip to the Ekubo quoter, returning the raw body.
+async fn fetch_quote(endpoint: &str) -> Result<String> {
+    let response = EKUBO_CLIENT.get(endpoint).send().await?;
+
+    if !response.status().is_success() {
+        anyhow::bail!("Ekubo quote failed with status {}", response.status());
+    }
+
+    Ok(response.text().await?)
+}
+
+/// Fetches a swap route from Ekubo.
+///
+/// Only the HTTP fetch is retried: it is an idempotent read. Parsing is
+/// deterministic, and the liquidation transaction itself must never be replayed
+/// automatically.
 pub async fn get_ekubo_route(
     from_token: Felt,
     to_token: Felt,
@@ -18,23 +45,29 @@ pub async fn get_ekubo_route(
 ) -> Result<(Vec<Swap>, Vec<u128>)> {
     let amount = amount * Decimal::TEN.pow(decimals);
 
-    let amount: u128 = amount.try_into().expect("Should fit in a u128 :)");
+    let amount: u128 = amount
+        .try_into()
+        .with_context(|| format!("swap amount {amount} does not fit in a u128"))?;
 
-    let ekubo_api_endpoint = format!(
+    let endpoint = format!(
         "{EKUBO_QUOTE_ENDPOINT}/-{amount}/{}/{}",
         from_token.to_fixed_hex_string(),
         to_token.to_fixed_hex_string()
     );
 
-    let http_client = reqwest::Client::new();
+    let response_text = (|| fetch_quote(&endpoint))
+        .retry(
+            ExponentialBuilder::default()
+                .with_min_delay(Duration::from_millis(200))
+                .with_max_delay(Duration::from_secs(2))
+                .with_max_times(3)
+                .with_jitter(),
+        )
+        .notify(|e, delay| {
+            tracing::warn!("[🔭 Monitoring] Ekubo quote failed ({e}), retrying in {delay:?}");
+        })
+        .await?;
 
-    let response = http_client.get(ekubo_api_endpoint).send().await?;
-
-    if !response.status().is_success() {
-        anyhow::bail!("API request failed with status: {}", response.status());
-    }
-
-    let response_text = response.text().await?;
     let json_value: Value = serde_json::from_str(&response_text)?;
 
     let splits = json_value["splits"]

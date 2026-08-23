@@ -1,52 +1,40 @@
-use std::{
-    env::current_dir,
-    fs::{self, File},
-    io::Write,
-};
+use std::{env, fs, path::PathBuf};
 
 use cainome::rs::ExecutionVersion;
 
+/// Contracts to generate bindings for: (ABI name, module name).
+const STARKNET_DEPLOYMENTS: [(&str, &str); 1] = [("Liquidate", "liquidate")];
+
 fn main() {
-    //Generate Starknet bindings
-    let strk_abi_base = current_dir()
-        .expect("failed to get current dir")
-        .join("abis");
-    let strk_bind_base = current_dir()
-        .expect("failed to get current dir")
-        .join("src/bindings");
-    let strk_deployments = [("Liquidate", "liquidate")];
+    println!("cargo::rerun-if-changed=abis");
+    println!("cargo::rerun-if-changed=build.rs");
 
-    // create destination folders if they doesn't exist
-    fs::create_dir_all(strk_bind_base.clone()).expect("error creating output folders");
-    let mut file = File::create(strk_bind_base.join("mod.rs")).expect("failed to create mod.rs");
+    let abi_base =
+        PathBuf::from(env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR")).join("abis");
+    // Generated code lives in `OUT_DIR` so that `cargo fmt --check` never sees it;
+    // `src/bindings.rs` includes it.
+    let out_dir = PathBuf::from(env::var("OUT_DIR").expect("OUT_DIR"));
 
-    for (abi_file, bind_out) in strk_deployments {
-        let contract_files =
-            strk_abi_base.join(format!("vesu_v2_periphery_{abi_file}.contract_class.json"));
-        let contract_files = contract_files.to_str().unwrap();
-        let abigen = cainome::rs::Abigen::new(abi_file, contract_files)
+    for (abi_file, module) in STARKNET_DEPLOYMENTS {
+        let contract_class =
+            abi_base.join(format!("vesu_v2_periphery_{abi_file}.contract_class.json"));
+        let contract_class = contract_class
+            .to_str()
+            .expect("contract class path is not valid utf8");
+
+        let bindings = cainome::rs::Abigen::new(abi_file, contract_class)
             .with_execution_version(ExecutionVersion::V3)
             .with_derives(vec![
                 "Debug".into(),
                 "Clone".into(),
                 "serde::Deserialize".into(),
                 "serde::Serialize".into(),
-            ]);
-
-        abigen
+            ])
             .generate()
-            .unwrap_or_else(|_| panic!("Fail to generate bindings {}", contract_files))
-            .write_to_file(
-                strk_bind_base
-                    .join(format!("{bind_out}.rs"))
-                    .to_str()
-                    .expect("valid utf8 path"),
-            )
-            .unwrap_or_else(|_| panic!("Fail to write bindings to file in {:?}", strk_bind_base));
+            .unwrap_or_else(|e| panic!("could not generate bindings for {contract_class}: {e:?}"));
 
-        file.write_all(b"#![allow(clippy::all, unused_assignments, unreachable_patterns)]\n")
-            .expect("failed to write into mod.rs");
-        file.write_all(format!("pub mod {};", bind_out).as_bytes())
-            .expect("failed to write into mod.rs");
+        let destination = out_dir.join(format!("{module}.rs"));
+        fs::write(&destination, bindings.to_string())
+            .unwrap_or_else(|e| panic!("could not write bindings to {destination:?}: {e}"));
     }
 }
