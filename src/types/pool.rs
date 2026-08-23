@@ -35,6 +35,7 @@ pub enum PoolName {
     Re7ETH,
     Re7STRK,
     ClearstarUSDCReactor,
+    Re7LabsStarknetEcosystem,
 }
 
 impl PoolName {
@@ -66,6 +67,9 @@ impl PoolName {
             }
             Self::ClearstarUSDCReactor => {
                 felt_hex!("0x01bc5de51365ed7fbb11ebc81cef9fd66b70050ec10fd898f0c4698765bf5803")
+            }
+            Self::Re7LabsStarknetEcosystem => {
+                felt_hex!("0x0486294fe74daf3d964523e7a1f4e5d686f153934b2c183ececa0cab9dd2f3e6")
             }
         }
     }

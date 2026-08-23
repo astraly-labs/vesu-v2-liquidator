@@ -245,6 +245,9 @@ impl IndexerService {
             PoolName::ClearstarUSDCReactor.pool_details(Currency::xstrkBTC, Currency::USDC),
             PoolName::ClearstarUSDCReactor.pool_details(Currency::USDC, Currency::WBTC),
             PoolName::ClearstarUSDCReactor.pool_details(Currency::xstrkBTC, Currency::WBTC),
+            // Re7 Labs Starknet Ecosystem — 2 pairs
+            PoolName::Re7LabsStarknetEcosystem.pool_details(Currency::EKUBO, Currency::USDC),
+            PoolName::Re7LabsStarknetEcosystem.pool_details(Currency::STRK, Currency::USDC),
         ]
     }
 }

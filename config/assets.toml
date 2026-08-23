@@ -129,3 +129,9 @@ name = "Endur xstrkBTC"
 ticker = "xstrkBTC"
 decimals = 8
 address = "0x47751b3532fabca89b0f2e35ca1cb45e5a7b11d5e3d3663dfa1f4406b45fd88"
+
+[[assets]]
+name = "Ekubo Protocol"
+ticker = "EKUBO"
+decimals = 18
+address = "0x75afe6402ad5a5c20dd25e10ec3b3986acaa647b77e4ae24b0cbc9a54a27a87"

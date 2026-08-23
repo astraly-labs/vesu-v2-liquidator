@@ -32,6 +32,37 @@ async fn fetch_quote(endpoint: &str) -> Result<String> {
     Ok(response.text().await?)
 }
 
+/// Reads one split's `amount_specified`.
+fn parse_amount(split: &Value) -> Result<i128> {
+    split["amount_specified"]
+        .as_str()
+        .context("amount_specified is not a string")?
+        .parse::<i128>()
+        .context("amount_specified is not an i128")
+}
+
+/// This split's share of `total`, in `SCALE` units.
+///
+/// `amount * SCALE` overflows a `u128` past ~340 units of an 18-decimal token, and
+/// release builds wrap silently instead of panicking. Only the ratio matters, so
+/// both sides are halved until the multiplication fits.
+fn weight_of(amount: i128, total: i128) -> Result<u128> {
+    const MAX_NUMERATOR: u128 = u128::MAX / SCALE;
+
+    let mut numerator = amount.unsigned_abs();
+    let mut denominator = total.unsigned_abs();
+
+    while numerator > MAX_NUMERATOR {
+        numerator >>= 1;
+        denominator >>= 1;
+    }
+
+    // Also catches a zero total, and a denominator shifted away by the loop.
+    anyhow::ensure!(denominator != 0, "Ekubo split total is zero");
+
+    Ok(numerator * SCALE / denominator)
+}
+
 /// Fetches a swap route from Ekubo.
 ///
 /// Only the HTTP fetch is retried: it is an idempotent read. Parsing is
@@ -96,17 +127,14 @@ pub async fn get_ekubo_route(
         ));
     }
 
-    // Calculate total amount for weight calculation
-    let total_amount: i128 = splits
-        .iter()
-        .map(|split| {
-            split["amount_specified"]
-                .as_str()
-                .unwrap_or("0")
-                .parse::<i128>()
-                .unwrap_or(0)
-        })
-        .sum();
+    let mut total_amount: i128 = 0;
+    for split in splits {
+        total_amount += parse_amount(split)?;
+    }
+    anyhow::ensure!(
+        total_amount != 0,
+        "Ekubo returned splits summing to a zero amount"
+    );
 
     let mut swaps = Vec::with_capacity(splits.len());
     let mut weights = Vec::with_capacity(splits.len());
@@ -114,12 +142,9 @@ pub async fn get_ekubo_route(
 
     // Process all splits except the last one
     for split in splits.iter().take(splits.len() - 1) {
-        let split_amount = split["amount_specified"]
-            .as_str()
-            .context("amount_specified is not a string")?
-            .parse::<i128>()?;
+        let split_amount = parse_amount(split)?;
 
-        let weight = (split_amount.unsigned_abs() * SCALE) / (total_amount.unsigned_abs());
+        let weight = weight_of(split_amount, total_amount)?;
         running_weight_sum += weight;
         weights.push(weight);
 
@@ -210,4 +235,27 @@ fn parse_route(split: &Value) -> Result<Vec<RouteNode>> {
             })
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A 50/50 split of a large 18-decimal debt must stay 50/50. `amount * SCALE`
+    /// overflows a `u128` past ~340 units, and a release build wraps silently: the
+    /// swap would then be routed at a ratio unrelated to the quote, and the
+    /// `total_weight == SCALE` assertion cannot catch it.
+    #[test]
+    fn split_weights_survive_a_large_18_decimal_amount() {
+        let half = 500 * 10_i128.pow(18);
+        let total = 2 * half;
+
+        assert_eq!(weight_of(half, total).unwrap(), SCALE / 2);
+        assert_eq!(weight_of(total, total).unwrap(), SCALE);
+    }
+
+    #[test]
+    fn weight_of_rejects_a_zero_total() {
+        assert!(weight_of(0, 0).is_err());
+    }
 }

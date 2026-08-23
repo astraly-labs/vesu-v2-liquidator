@@ -44,6 +44,7 @@ pub enum Currency {
     sUSN,
     strkBTC,
     xstrkBTC,
+    EKUBO,
 }
 
 impl Currency {

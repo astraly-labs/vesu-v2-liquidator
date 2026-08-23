@@ -137,7 +137,15 @@ impl MonitoringService {
                         .collect();
 
                     for key in due {
-                        let Some(position) = self.current_positions.get(&key).cloned() else {
+                        // Re-checked here, not just in the filter above: an earlier
+                        // liquidation in this batch can take minutes, and prices refresh
+                        // every 10s. Never submit on a verdict from a previous batch.
+                        let Some(position) = self
+                            .current_positions
+                            .get(&key)
+                            .filter(|position| !position.is_closed() && position.is_liquidable())
+                            .cloned()
+                        else {
                             continue;
                         };
 
@@ -147,15 +155,18 @@ impl MonitoringService {
                             Ok(()) => {
                                 self.retry_after.remove(&key);
                             }
+                            Err(e) if e.to_string().contains("not-undercollateralized") => {
+                                // A lost race, not a failure: someone liquidated first, or
+                                // the price recovered. Backing off here would blind us to
+                                // exactly the positions sitting on their threshold.
+                                tracing::warn!("[🔭 Monitoring] Position was not under collateralized!");
+                                self.retry_after.remove(&key);
+                            }
                             Err(e) => {
-                                if e.to_string().contains("not-undercollateralized") {
-                                    tracing::warn!("[🔭 Monitoring] Position was not under collateralized!");
-                                } else {
-                                    tracing::error!(
-                                        error = %e,
-                                        "[🔭 Monitoring] 😨 Could not liquidate position",
-                                    );
-                                }
+                                tracing::error!(
+                                    error = %e,
+                                    "[🔭 Monitoring] 😨 Could not liquidate position",
+                                );
                                 self.back_off(key);
                             }
                         }
